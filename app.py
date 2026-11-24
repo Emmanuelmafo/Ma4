@@ -19,13 +19,13 @@ def dashboard(role):
     if role not in {"owner", "manager", "employee"}:
         role = "owner"
     totals = fetch_one("""SELECT COALESCE(SUM(storage_quantity), 0) AS storage,
-               COALESCE(SUM(display_quantity), 0) AS display FROM products""")
-    product_count = fetch_one("SELECT COUNT(*) AS count FROM products")["count"]
+               COALESCE(SUM(display_quantity), 0) AS display FROM smartshop_products""")
+    product_count = fetch_one("SELECT COUNT(*) AS count FROM smartshop_products")["count"]
     today_sales = fetch_one("""SELECT COALESCE(SUM(total_amount), 0) AS amount
-        FROM sales WHERE DATE(created_at) = CURRENT_DATE""")["amount"]
-    products = fetch_all("SELECT * FROM products ORDER BY name LIMIT 12")
+        FROM smartshop_sales WHERE DATE(created_at) = CURRENT_DATE""")["amount"]
+    smartshop_products = fetch_all("SELECT * FROM smartshop_products ORDER BY name LIMIT 12")
     return render_template("dashboard.html", role=role, totals=totals,
-        product_count=product_count, today_sales=today_sales, products=products)
+        product_count=product_count, today_sales=today_sales, smartshop_products=smartshop_products)
 
 @app.route("/manager/receive", methods=["GET", "POST"])
 def receive_stock():
@@ -45,27 +45,27 @@ def receive_stock():
         if not name or quantity <= 0 or min(boxes, units_per_box, loose_units) < 0 or min(buying_price, selling_price) < 0:
             flash("Enter a product name and valid quantities and prices.", "error")
             return redirect(url_for("receive_stock"))
-        existing = fetch_one("SELECT id FROM products WHERE LOWER(name)=LOWER(:name)", {"name": name})
+        existing = fetch_one("SELECT id FROM smartshop_products WHERE LOWER(name)=LOWER(:name)", {"name": name})
         if existing:
             product_id = existing["id"]
-            run("""UPDATE products SET storage_quantity = storage_quantity + :quantity,
+            run("""UPDATE smartshop_products SET storage_quantity = storage_quantity + :quantity,
                 buying_price = :buying_price, selling_price = :selling_price,
                 box_barcode = COALESCE(:box_barcode, box_barcode) WHERE id = :product_id""",
                 {"quantity": quantity, "buying_price": str(buying_price), "selling_price": str(selling_price),
                  "box_barcode": box_barcode, "product_id": product_id})
         else:
-            product_id = insert("""INSERT INTO products
+            product_id = insert("""INSERT INTO smartshop_products
                 (name, box_barcode, storage_quantity, buying_price, selling_price)
                 VALUES (:name, :box_barcode, :quantity, :buying_price, :selling_price)""",
                 {"name": name, "box_barcode": box_barcode, "quantity": quantity,
                  "buying_price": str(buying_price), "selling_price": str(selling_price)})
-        run("""INSERT INTO stock_movements
+        run("""INSERT INTO smartshop_stock_movements
             (product_id, movement_type, quantity, source_location, destination_location, note)
             VALUES (:product_id, 'RECEIVE', :quantity, 'SUPPLIER', 'STORAGE', 'Stock received')""",
             {"product_id": product_id, "quantity": quantity})
         flash(f"Received {quantity} units of {name} into storage.", "success")
         return redirect(url_for("dashboard", role="manager"))
-    return render_template("form.html", mode="receive", products=[])
+    return render_template("form.html", mode="receive", smartshop_products=[])
 
 @app.route("/manager/display", methods=["GET", "POST"])
 def move_to_display():
@@ -76,21 +76,21 @@ def move_to_display():
         except ValueError:
             flash("Choose a product and enter a valid quantity.", "error")
             return redirect(url_for("move_to_display"))
-        product = fetch_one("SELECT * FROM products WHERE id=:id", {"id": product_id})
+        product = fetch_one("SELECT * FROM smartshop_products WHERE id=:id", {"id": product_id})
         if not product or quantity <= 0 or quantity > product["storage_quantity"]:
             flash("Insufficient storage stock or invalid quantity.", "error")
         else:
-            run("""UPDATE products SET storage_quantity = storage_quantity - :quantity,
+            run("""UPDATE smartshop_products SET storage_quantity = storage_quantity - :quantity,
                 display_quantity = display_quantity + :quantity WHERE id = :id""",
                 {"quantity": quantity, "id": product_id})
-            run("""INSERT INTO stock_movements
+            run("""INSERT INTO smartshop_stock_movements
                 (product_id, movement_type, quantity, source_location, destination_location, note)
                 VALUES (:id, 'TRANSFER', :quantity, 'STORAGE', 'DISPLAY', 'Prepared for display')""",
                 {"id": product_id, "quantity": quantity})
             flash("Stock moved to display. Total stock remains unchanged.", "success")
         return redirect(url_for("move_to_display"))
-    products = fetch_all("SELECT * FROM products ORDER BY name")
-    return render_template("form.html", mode="display", products=products)
+    smartshop_products = fetch_all("SELECT * FROM smartshop_products ORDER BY name")
+    return render_template("form.html", mode="display", smartshop_products=smartshop_products)
 
 @app.route("/employee/pos", methods=["GET", "POST"])
 def point_of_sale():
@@ -101,34 +101,34 @@ def point_of_sale():
         except ValueError:
             quantity = 0
         if barcode:
-            product = fetch_one("SELECT * FROM products WHERE item_barcode=:barcode OR box_barcode=:barcode", {"barcode": barcode})
+            product = fetch_one("SELECT * FROM smartshop_products WHERE item_barcode=:barcode OR box_barcode=:barcode", {"barcode": barcode})
         else:
             try:
                 product_id = int(request.form.get("product_id", "0"))
             except ValueError:
                 product_id = 0
-            product = fetch_one("SELECT * FROM products WHERE id=:id", {"id": product_id})
+            product = fetch_one("SELECT * FROM smartshop_products WHERE id=:id", {"id": product_id})
         if not product or quantity <= 0 or quantity > product["display_quantity"]:
             flash("Product not found or insufficient display stock.", "error")
         else:
             amount = Decimal(str(product["selling_price"])) * quantity
-            sale_id = insert("INSERT INTO sales (total_amount) VALUES (:amount)", {"amount": str(amount)})
-            run("INSERT INTO sale_items (sale_id, product_id, quantity, unit_price) VALUES (:sale_id, :product_id, :quantity, :price)",
+            sale_id = insert("INSERT INTO smartshop_sales (total_amount) VALUES (:amount)", {"amount": str(amount)})
+            run("INSERT INTO smartshop_sale_items (sale_id, product_id, quantity, unit_price) VALUES (:sale_id, :product_id, :quantity, :price)",
                 {"sale_id": sale_id, "product_id": product["id"], "quantity": quantity, "price": str(product["selling_price"])})
-            run("UPDATE products SET display_quantity = display_quantity - :quantity WHERE id = :product_id",
+            run("UPDATE smartshop_products SET display_quantity = display_quantity - :quantity WHERE id = :product_id",
                 {"quantity": quantity, "product_id": product["id"]})
-            run("""INSERT INTO stock_movements
+            run("""INSERT INTO smartshop_stock_movements
                 (product_id, movement_type, quantity, source_location, destination_location, note)
                 VALUES (:product_id, 'SALE', :quantity, 'DISPLAY', 'SOLD', 'POS sale')""",
                 {"product_id": product["id"], "quantity": quantity})
             flash(f"Sale completed: {quantity} × {product['name']} = K{amount}.", "success")
         return redirect(url_for("point_of_sale"))
-    products = fetch_all("SELECT * FROM products ORDER BY name")
-    return render_template("form.html", mode="pos", products=products)
+    smartshop_products = fetch_all("SELECT * FROM smartshop_products ORDER BY name")
+    return render_template("form.html", mode="pos", smartshop_products=smartshop_products)
 
 @app.get("/api/product/barcode/<barcode>")
 def barcode_lookup(barcode):
-    product = fetch_one("""SELECT id, name, selling_price, display_quantity FROM products
+    product = fetch_one("""SELECT id, name, selling_price, display_quantity FROM smartshop_products
         WHERE item_barcode=:barcode OR box_barcode=:barcode""", {"barcode": barcode})
     if not product:
         return jsonify({"error": "Product not found"}), 404
