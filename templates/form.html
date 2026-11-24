@@ -17,7 +17,7 @@
   </div>
   <label>Box / pack barcode (scan only)</label>
   <div class="scan-row"><input id="box-barcode" name="box_barcode" readonly placeholder="Scan box barcode"><button type="button" class="scan-button" data-scan-target="box-barcode">Scan barcode</button></div>
-  <small>Individual item barcodes are registered separately after selecting the product.</small>
+  <small>Only the box barcode is needed here. The first time an item barcode is scanned at checkout, SmartShop will ask which product it belongs to and remember it automatically.</small>
   <div class="grid">
     <label>Buying price per unit<input name="buying_price" type="number" min="0" step="0.01" value="0"></label>
     <label>Selling price per unit<input name="selling_price" type="number" min="0" step="0.01" value="0"></label>
@@ -54,6 +54,25 @@
   <button type="submit">Move to display</button>
 </form>
 {% else %}
+{% if unknown_barcode %}
+  <div class="notice">
+    <h3>New item barcode detected</h3>
+    <p>Barcode <strong>{{unknown_barcode}}</strong> is not linked to a product yet. Select what this item is. SmartShop will remember this barcode for future sales.</p>
+  </div>
+  <form method="post">
+    <input type="hidden" name="barcode" value="{{unknown_barcode}}">
+    <label>Which product is this item?
+      <select name="link_product_id" required>
+        <option value="">Select the matching product</option>
+        {% for p in products %}
+          <option value="{{p.id}}">{{p.name}} — {{p.display_quantity}} on display — K{{p.selling_price}}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Quantity<input name="quantity" type="number" min="1" value="{{scanned_quantity or 1}}" required></label>
+    <button type="submit">Remember barcode and complete sale</button>
+  </form>
+{% else %}
 <form method="post">
   <label>Scan product barcode at checkout</label>
   <div class="scan-row"><input id="pos-barcode" name="barcode" readonly placeholder="Scan product barcode"><button type="button" class="scan-button" data-scan-target="pos-barcode">Scan barcode</button></div>
@@ -61,6 +80,7 @@
   <label>Quantity<input name="quantity" type="number" min="1" value="1" required></label>
   <button type="submit">Complete sale</button>
 </form>
+{% endif %}
 {% endif %}
 <div id="scanner-panel" hidden style="margin-top:16px">
   <div id="barcode-reader" style="width:100%"></div>
