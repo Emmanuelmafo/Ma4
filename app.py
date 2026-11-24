@@ -88,36 +88,6 @@ def register_item_barcode():
         return redirect(url_for("register_item_barcode", product_id=product_id))
     search = request.args.get("search", "").strip()
     selected_id = request.args.get("product_id", type=int)
-    matches = fetch_all("SELECT id, name, storage_quantity, display_quantity FROM smartshop_products WHERE name ILIKE :term ORDER BY name LIMIT 20",
-                        {"term": f"%{search}%"}) if search else []
-    selected = fetch_one("SELECT id, name FROM smartshop_products WHERE id=:id", {"id": selected_id}) if selected_id else None
-    barcode_count = fetch_one("SELECT COUNT(*) AS count FROM smartshop_item_barcodes WHERE product_id=:id",
-                              {"id": selected_id})["count"] if selected_id else 0
-    return render_template("form.html", mode="register_barcode", products=matches,
-                           selected_product=selected, barcode_count=barcode_count, search=search)
-
-
-@app.route("/manager/register-item-barcode", methods=["GET", "POST"])
-def register_item_barcode():
-    if request.method == "POST":
-        try:
-            product_id = int(request.form.get("product_id", "0"))
-        except ValueError:
-            product_id = 0
-        barcode = request.form.get("scanned_barcode", "").strip()
-        product = fetch_one("SELECT id, name FROM smartshop_products WHERE id=:id", {"id": product_id})
-        if not product or not barcode:
-            flash("Search for a product and scan its individual barcode before registering.", "error")
-        else:
-            try:
-                run("INSERT INTO smartshop_item_barcodes (product_id, barcode) VALUES (:product_id, :barcode)",
-                    {"product_id": product_id, "barcode": barcode})
-                flash(f"Individual barcode registered for {product['name']}.", "success")
-            except Exception:
-                flash("That barcode is already registered. Scan a different item's barcode.", "error")
-        return redirect(url_for("register_item_barcode", product_id=product_id))
-    search = request.args.get("search", "").strip()
-    selected_id = request.args.get("product_id", type=int)
     matches = fetch_all("SELECT id, name, storage_quantity, display_quantity FROM smartshop_products WHERE LOWER(name) LIKE LOWER(:term) ORDER BY name LIMIT 20",
                         {"term": f"%{search}%"}) if search else []
     selected = fetch_one("SELECT id, name FROM smartshop_products WHERE id=:id", {"id": selected_id}) if selected_id else None
