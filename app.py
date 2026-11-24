@@ -130,26 +130,66 @@ def point_of_sale():
         barcode = request.form.get("barcode", "").strip()
         try:
             quantity = int(request.form.get("quantity", "1"))
+            selected_product_id = int(request.form.get("link_product_id", "0"))
         except ValueError:
             quantity = 0
+            selected_product_id = 0
+
+        product = None
         if barcode:
             product = fetch_one("""SELECT p.* FROM smartshop_products p
                 LEFT JOIN smartshop_item_barcodes b ON b.product_id=p.id
-                WHERE b.barcode=:barcode OR p.box_barcode=:barcode""", {"barcode": barcode})
+                WHERE b.barcode=:barcode OR p.box_barcode=:barcode""",
+                {"barcode": barcode})
+
+            # An unknown item barcode is linked inline at the till.
+            # The employee only chooses a product the first time this barcode appears.
+            if not product and selected_product_id:
+                selected = fetch_one(
+                    "SELECT id, name FROM smartshop_products WHERE id=:id",
+                    {"id": selected_product_id})
+                if selected:
+                    try:
+                        run("""INSERT INTO smartshop_item_barcodes (product_id, barcode)
+                            VALUES (:product_id, :barcode)""",
+                            {"product_id": selected_product_id, "barcode": barcode})
+                    except Exception:
+                        # A simultaneous scan may have registered it already.
+                        pass
+                    product = fetch_one("""SELECT p.* FROM smartshop_products p
+                        LEFT JOIN smartshop_item_barcodes b ON b.product_id=p.id
+                        WHERE b.barcode=:barcode OR p.box_barcode=:barcode""",
+                        {"barcode": barcode})
+
+            if not product:
+                products = fetch_all(
+                    "SELECT id, name, display_quantity, selling_price FROM smartshop_products ORDER BY name")
+                return render_template("form.html", mode="pos", products=products,
+                    unknown_barcode=barcode, scanned_quantity=max(quantity, 1))
+
         else:
             try:
                 product_id = int(request.form.get("product_id", "0"))
             except ValueError:
                 product_id = 0
-            product = fetch_one("SELECT * FROM smartshop_products WHERE id=:id", {"id": product_id})
+            product = fetch_one(
+                "SELECT * FROM smartshop_products WHERE id=:id", {"id": product_id})
+
         if not product or quantity <= 0 or quantity > product["display_quantity"]:
             flash("Product not found or insufficient display stock.", "error")
         else:
             amount = Decimal(str(product["selling_price"])) * quantity
-            sale_id = insert("INSERT INTO smartshop_sales (total_amount) VALUES (:amount)", {"amount": str(amount)})
-            run("INSERT INTO smartshop_sale_items (sale_id, product_id, quantity, unit_price) VALUES (:sale_id, :product_id, :quantity, :price)",
-                {"sale_id": sale_id, "product_id": product["id"], "quantity": quantity, "price": str(product["selling_price"])})
-            run("UPDATE smartshop_products SET display_quantity = display_quantity - :quantity WHERE id = :product_id",
+            sale_id = insert(
+                "INSERT INTO smartshop_sales (total_amount) VALUES (:amount)",
+                {"amount": str(amount)})
+            run("""INSERT INTO smartshop_sale_items
+                (sale_id, product_id, quantity, unit_price)
+                VALUES (:sale_id, :product_id, :quantity, :price)""",
+                {"sale_id": sale_id, "product_id": product["id"],
+                 "quantity": quantity, "price": str(product["selling_price"])})
+            run("""UPDATE smartshop_products
+                SET display_quantity = display_quantity - :quantity
+                WHERE id = :product_id""",
                 {"quantity": quantity, "product_id": product["id"]})
             run("""INSERT INTO smartshop_stock_movements
                 (product_id, movement_type, quantity, source_location, destination_location, note)
@@ -157,6 +197,7 @@ def point_of_sale():
                 {"product_id": product["id"], "quantity": quantity})
             flash(f"Sale completed: {quantity} × {product['name']} = K{amount}.", "success")
         return redirect(url_for("point_of_sale"))
+
     smartshop_products = fetch_all("SELECT * FROM smartshop_products ORDER BY name")
     return render_template("form.html", mode="pos", products=smartshop_products)
 
