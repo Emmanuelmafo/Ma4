@@ -31,7 +31,6 @@ def dashboard(role):
 def receive_stock():
     if request.method == "POST":
         name = request.form.get("name", "").strip()
-        item_barcode = request.form.get("item_barcode", "").strip() or None
         box_barcode = request.form.get("box_barcode", "").strip() or None
         try:
             boxes = int(request.form.get("boxes", "0"))
@@ -51,15 +50,14 @@ def receive_stock():
             product_id = existing["id"]
             run("""UPDATE smartshop_products SET storage_quantity = storage_quantity + :quantity,
                 buying_price = :buying_price, selling_price = :selling_price,
-                item_barcode = COALESCE(:item_barcode, item_barcode),
                 box_barcode = COALESCE(:box_barcode, box_barcode) WHERE id = :product_id""",
                 {"quantity": quantity, "buying_price": str(buying_price), "selling_price": str(selling_price),
-                 "box_barcode": box_barcode, "item_barcode": item_barcode, "product_id": product_id})
+                 "box_barcode": box_barcode, "product_id": product_id})
         else:
             product_id = insert("""INSERT INTO smartshop_products
-                (name, item_barcode, box_barcode, storage_quantity, buying_price, selling_price)
-                VALUES (:name, :item_barcode, :box_barcode, :quantity, :buying_price, :selling_price)""",
-                {"name": name, "item_barcode": item_barcode, "box_barcode": box_barcode, "quantity": quantity,
+                (name, box_barcode, storage_quantity, buying_price, selling_price)
+                VALUES (:name, :box_barcode, :quantity, :buying_price, :selling_price)""",
+                {"name": name, "box_barcode": box_barcode, "quantity": quantity,
                  "buying_price": str(buying_price), "selling_price": str(selling_price)})
         run("""INSERT INTO smartshop_stock_movements
             (product_id, movement_type, quantity, source_location, destination_location, note)
@@ -68,6 +66,35 @@ def receive_stock():
         flash(f"Received {quantity} units of {name} into storage.", "success")
         return redirect(url_for("dashboard", role="manager"))
     return render_template("form.html", mode="receive", products=[])
+
+@app.route("/manager/register-item-barcode", methods=["GET", "POST"])
+def register_item_barcode():
+    if request.method == "POST":
+        try:
+            product_id = int(request.form.get("product_id", "0"))
+        except ValueError:
+            product_id = 0
+        barcode = request.form.get("scanned_barcode", "").strip()
+        product = fetch_one("SELECT id, name FROM smartshop_products WHERE id=:id", {"id": product_id})
+        if not product or not barcode:
+            flash("Search for a product and scan its individual barcode before registering.", "error")
+        else:
+            try:
+                run("INSERT INTO smartshop_item_barcodes (product_id, barcode) VALUES (:product_id, :barcode)",
+                    {"product_id": product_id, "barcode": barcode})
+                flash(f"Individual barcode registered for {product['name']}.", "success")
+            except Exception:
+                flash("That barcode is already registered. Scan a different item's barcode.", "error")
+        return redirect(url_for("register_item_barcode", product_id=product_id))
+    search = request.args.get("search", "").strip()
+    selected_id = request.args.get("product_id", type=int)
+    matches = fetch_all("SELECT id, name, storage_quantity, display_quantity FROM smartshop_products WHERE name ILIKE :term ORDER BY name LIMIT 20",
+                        {"term": f"%{search}%"}) if search else []
+    selected = fetch_one("SELECT id, name FROM smartshop_products WHERE id=:id", {"id": selected_id}) if selected_id else None
+    barcode_count = fetch_one("SELECT COUNT(*) AS count FROM smartshop_item_barcodes WHERE product_id=:id",
+                              {"id": selected_id})["count"] if selected_id else 0
+    return render_template("form.html", mode="register_barcode", products=matches,
+                           selected_product=selected, barcode_count=barcode_count, search=search)
 
 @app.route("/manager/display", methods=["GET", "POST"])
 def move_to_display():
@@ -103,7 +130,9 @@ def point_of_sale():
         except ValueError:
             quantity = 0
         if barcode:
-            product = fetch_one("SELECT * FROM smartshop_products WHERE item_barcode=:barcode OR box_barcode=:barcode", {"barcode": barcode})
+            product = fetch_one("""SELECT p.* FROM smartshop_products p
+                LEFT JOIN smartshop_item_barcodes b ON b.product_id=p.id
+                WHERE b.barcode=:barcode OR p.box_barcode=:barcode""", {"barcode": barcode})
         else:
             try:
                 product_id = int(request.form.get("product_id", "0"))
@@ -130,8 +159,9 @@ def point_of_sale():
 
 @app.get("/api/product/barcode/<barcode>")
 def barcode_lookup(barcode):
-    product = fetch_one("""SELECT id, name, selling_price, display_quantity FROM smartshop_products
-        WHERE item_barcode=:barcode OR box_barcode=:barcode""", {"barcode": barcode})
+    product = fetch_one("""SELECT p.id, p.name, p.selling_price, p.display_quantity FROM smartshop_products p
+        LEFT JOIN smartshop_item_barcodes b ON b.product_id=p.id
+        WHERE b.barcode=:barcode OR p.box_barcode=:barcode""", {"barcode": barcode})
     if not product:
         return jsonify({"error": "Product not found"}), 404
     return jsonify(dict(product))
