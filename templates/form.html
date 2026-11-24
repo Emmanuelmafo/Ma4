@@ -1,0 +1,15 @@
+{% extends "base.html" %}{% block content %}
+<p class="eyebrow">SmartShop operations</p>
+<h1>{% if mode=='receive' %}Receive box stock{% elif mode=='display' %}Prepare display items{% else %}Point of Sale{% endif %}</h1>
+<section class="panel"><form method="post">
+{% if mode=='receive' %}
+<label>Product name<input name="name" required placeholder="e.g. 1L Cooking Oil"></label>
+<div class="grid"><label>Number of boxes<input type="number" name="boxes" min="0" value="1"></label><label>Units per box<input type="number" name="units_per_box" min="0" value="12"></label><label>Loose units<input type="number" name="loose_units" min="0" value="0"></label></div>
+<label>Box barcode (optional)<input name="box_barcode"></label>
+<div class="grid"><label>Buying price per unit<input name="buying_price" type="number" min="0" step="0.01" value="0"></label><label>Selling price per unit<input name="selling_price" type="number" min="0" step="0.01" value="0"></label></div>
+<button type="submit">Receive stock into storage</button>
+{% elif mode=='display' %}
+<label>Product<select name="product_id" required><option value="">Select product</option>{% for p in products %}<option value="{{p.id}}">{{p.name}} — {{p.storage_quantity}} in storage</option>{% endfor %}</select></label><label>Quantity to move<input name="quantity" type="number" min="1" required></label><button type="submit">Move to display</button>
+{% else %}
+<label>Barcode (optional)<input name="barcode" placeholder="Scan or enter barcode"></label><label>Choose product if no barcode<select name="product_id"><option value="">Select product</option>{% for p in products %}<option value="{{p.id}}">{{p.name}} — {{p.display_quantity}} on display — K{{p.selling_price}}</option>{% endfor %}</select></label><label>Quantity<input name="quantity" type="number" min="1" value="1" required></label><button type="submit">Complete sale</button>
+{% endif %}</form></section>{% endblock %}
