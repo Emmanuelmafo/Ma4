@@ -1,27 +1,115 @@
 {% extends "base.html" %}{% block content %}
 <p class="eyebrow">SmartShop operations</p>
-<h1>{% if mode=='receive' %}Receive box stock{% elif mode=='display' %}Prepare display items{% else %}Point of Sale{% endif %}</h1>
-<section class="panel"><form method="post">
+<h1>{% if mode=='receive' %}Receive stock{% elif mode=='display' %}Prepare display items{% elif mode=='register_barcode' %}Register individual item barcodes{% else %}Point of Sale{% endif %}</h1>
+<section class="panel">
 {% if mode=='receive' %}
-<label>Product name<input id="product-name" name="name" required placeholder="e.g. 1L Cooking Oil"></label>
-<div class="ocr-tools">
-  <label>Capture product name with camera (OCR)<input id="label-photo" type="file" accept="image/*" capture="environment"></label>
-  <button type="button" id="read-label">Read name from photo</button>
-  <small id="ocr-status">Take a clear photo of the printed product name. Check the result before saving.</small>
-</div>
-<div class="grid"><label>Number of boxes<input type="number" name="boxes" min="0" value="1"></label><label>Units per box<input type="number" name="units_per_box" min="0" value="12"></label><label>Loose units<input type="number" name="loose_units" min="0" value="0"></label></div>
-<div class="grid">
-  <label>Individual product barcode (optional)<input name="item_barcode" inputmode="numeric" placeholder="Scan or enter barcode"></label>
-  <label>Box / pack barcode (optional)<input name="box_barcode" inputmode="numeric" placeholder="Scan or enter barcode"></label>
-</div>
-<small>Barcodes are saved against this product for identification during sales. A barcode scanner can enter the number into these fields.</small>
-<div class="grid"><label>Buying price per unit<input name="buying_price" type="number" min="0" step="0.01" value="0"></label><label>Selling price per unit<input name="selling_price" type="number" min="0" step="0.01" value="0"></label></div>
-<button type="submit">Receive stock into storage</button>
+<form method="post">
+  <label>Product name<input id="product-name" name="name" required placeholder="e.g. 1L Cooking Oil"></label>
+  <div class="ocr-tools">
+    <label>Capture product name with camera (OCR)<input id="label-photo" type="file" accept="image/*" capture="environment"></label>
+    <button type="button" id="read-label">Read name from photo</button>
+    <small id="ocr-status">Take a clear photo of the printed product name. Check the result before saving.</small>
+  </div>
+  <div class="grid">
+    <label>Number of boxes<input type="number" name="boxes" min="0" value="1"></label>
+    <label>Units per box<input type="number" name="units_per_box" min="0" value="12"></label>
+    <label>Loose units<input type="number" name="loose_units" min="0" value="0"></label>
+  </div>
+  <label>Box / pack barcode (scan only)</label>
+  <div class="scan-row"><input id="box-barcode" name="box_barcode" readonly placeholder="Scan box barcode"><button type="button" class="scan-button" data-scan-target="box-barcode">Scan barcode</button></div>
+  <small>Individual item barcodes are registered separately after selecting the product.</small>
+  <div class="grid">
+    <label>Buying price per unit<input name="buying_price" type="number" min="0" step="0.01" value="0"></label>
+    <label>Selling price per unit<input name="selling_price" type="number" min="0" step="0.01" value="0"></label>
+  </div>
+  <button type="submit">Receive stock into storage</button>
+</form>
+{% elif mode=='register_barcode' %}
+<form method="get" action="{{ url_for('register_item_barcode') }}">
+  <label>Search product by name<input name="search" value="{{search}}" placeholder="Enter product name"></label>
+  <button type="submit">Search products</button>
+</form>
+{% if products %}
+  <h3>Search results</h3>
+  {% for p in products %}
+    <p><a href="{{ url_for('register_item_barcode', product_id=p.id) }}">{{p.name}} — {{p.storage_quantity + p.display_quantity}} units in stock</a></p>
+  {% endfor %}
+{% endif %}
+{% if selected_product %}
+  <hr>
+  <h3>Selected product: {{selected_product.name}}</h3>
+  <p>Individual barcodes already registered: {{barcode_count}}</p>
+  <p>Scan the barcode on each individual item you want to register. This field cannot be typed manually.</p>
+  <form method="post">
+    <input type="hidden" name="product_id" value="{{selected_product.id}}">
+    <label>Individual item barcode (required)</label>
+    <div class="scan-row"><input id="individual-barcode" name="scanned_barcode" readonly required placeholder="Scan an item's barcode"><button type="button" class="scan-button" data-scan-target="individual-barcode">Scan item</button></div>
+    <button type="submit">Register scanned item barcode</button>
+  </form>
+{% endif %}
 {% elif mode=='display' %}
-<label>Product<select name="product_id" required><option value="">Select product</option>{% for p in products %}<option value="{{p.id}}">{{p.name}} — {{p.storage_quantity}} in storage</option>{% endfor %}</select></label><label>Quantity to move<input name="quantity" type="number" min="1" required></label><button type="submit">Move to display</button>
+<form method="post">
+  <label>Product<select name="product_id" required><option value="">Select product</option>{% for p in products %}<option value="{{p.id}}">{{p.name}} — {{p.storage_quantity}} in storage</option>{% endfor %}</select></label>
+  <label>Quantity to move<input name="quantity" type="number" min="1" required></label>
+  <button type="submit">Move to display</button>
+</form>
 {% else %}
-<label>Barcode (optional)<input name="barcode" placeholder="Scan or enter barcode"></label><label>Choose product if no barcode<select name="product_id"><option value="">Select product</option>{% for p in products %}<option value="{{p.id}}">{{p.name}} — {{p.display_quantity}} on display — K{{p.selling_price}}</option>{% endfor %}</select></label><label>Quantity<input name="quantity" type="number" min="1" value="1" required></label><button type="submit">Complete sale</button>
-{% endif %}</form></section>
+<form method="post">
+  <label>Scan product barcode at checkout</label>
+  <div class="scan-row"><input id="pos-barcode" name="barcode" readonly placeholder="Scan product barcode"><button type="button" class="scan-button" data-scan-target="pos-barcode">Scan barcode</button></div>
+  <label>Choose product if it has no barcode<select name="product_id"><option value="">Select product</option>{% for p in products %}<option value="{{p.id}}">{{p.name}} — {{p.display_quantity}} on display — K{{p.selling_price}}</option>{% endfor %}</select></label>
+  <label>Quantity<input name="quantity" type="number" min="1" value="1" required></label>
+  <button type="submit">Complete sale</button>
+</form>
+{% endif %}
+<div id="scanner-panel" hidden style="margin-top:16px">
+  <div id="barcode-reader" style="width:100%"></div>
+  <button type="button" id="stop-scanner">Stop camera</button>
+  <p id="scan-status" aria-live="polite">Allow camera access to scan a barcode.</p>
+</div>
+</section>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+(() => {
+  let scanner = null;
+  let target = null;
+  const panel = document.getElementById('scanner-panel');
+  const status = document.getElementById('scan-status');
+  async function stopScanner() {
+    if (scanner) {
+      try { await scanner.stop(); await scanner.clear(); } catch (e) {}
+      scanner = null;
+    }
+    panel.hidden = true;
+  }
+  document.querySelectorAll('[data-scan-target]').forEach(button => {
+    button.addEventListener('click', async () => {
+      target = document.getElementById(button.dataset.scanTarget);
+      if (!window.Html5Qrcode) { alert('Barcode scanner could not load. Check your internet connection.'); return; }
+      await stopScanner();
+      panel.hidden = false;
+      status.textContent = 'Starting camera…';
+      scanner = new Html5Qrcode('barcode-reader');
+      try {
+        await scanner.start({ facingMode: 'environment' },
+          { fps: 12, qrbox: { width: 280, height: 140 },
+            formatsToSupport: [Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
+              Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E,
+              Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.CODE_39] },
+          async decodedText => {
+            target.value = decodedText;
+            status.textContent = 'Barcode scanned successfully: ' + decodedText;
+            await stopScanner();
+          }, () => {});
+        status.textContent = 'Point the camera at the barcode.';
+      } catch (error) {
+        status.textContent = 'Could not start camera. Allow camera permission and use the secure HTTPS site.';
+      }
+    });
+  });
+  document.getElementById('stop-scanner').addEventListener('click', stopScanner);
+})();
+</script>
 {% if mode=='receive' %}
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
@@ -32,21 +120,17 @@
   readButton.addEventListener('click', async () => {
     const file = photoInput.files && photoInput.files[0];
     if (!file) { statusText.textContent = 'Take or select a photo first.'; return; }
-    if (!window.Tesseract) { statusText.textContent = 'OCR library could not load. You can type the name manually.'; return; }
+    if (!window.Tesseract) { statusText.textContent = 'OCR library could not load. Type the name manually.'; return; }
     readButton.disabled = true;
     statusText.textContent = 'Reading the product label…';
     try {
       const result = await Tesseract.recognize(file, 'eng');
       const lines = result.data.text.split('\\n').map(line => line.trim()).filter(Boolean);
       nameInput.value = lines[0] || '';
-      statusText.textContent = nameInput.value
-        ? 'Name captured. Check and correct it before saving.'
-        : 'No clear name found. Try another photo or type it manually.';
+      statusText.textContent = nameInput.value ? 'Name captured. Check it before saving.' : 'No clear name found. Try another photo.';
     } catch (error) {
       statusText.textContent = 'Could not read that photo. Type the name manually or try again.';
-    } finally {
-      readButton.disabled = false;
-    }
+    } finally { readButton.disabled = false; }
   });
 </script>
 {% endif %}
