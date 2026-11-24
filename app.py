@@ -8,7 +8,10 @@ app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "development-key-change-befor
 
 @app.before_request
 def ensure_schema():
-    init_db()
+    # Keep Railway's health probe independent of database availability.
+    # Normal application pages initialise the SmartShop tables before use.
+    if request.endpoint != "health":
+        init_db()
 
 @app.get("/")
 def home():
