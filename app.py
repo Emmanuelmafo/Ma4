@@ -25,12 +25,13 @@ def dashboard(role):
         FROM smartshop_sales WHERE DATE(created_at) = CURRENT_DATE""")["amount"]
     smartshop_products = fetch_all("SELECT * FROM smartshop_products ORDER BY name LIMIT 12")
     return render_template("dashboard.html", role=role, totals=totals,
-        product_count=product_count, today_sales=today_sales, smartshop_products=smartshop_products)
+        product_count=product_count, today_sales=today_sales, products=smartshop_products)
 
 @app.route("/manager/receive", methods=["GET", "POST"])
 def receive_stock():
     if request.method == "POST":
         name = request.form.get("name", "").strip()
+        item_barcode = request.form.get("item_barcode", "").strip() or None
         box_barcode = request.form.get("box_barcode", "").strip() or None
         try:
             boxes = int(request.form.get("boxes", "0"))
@@ -50,14 +51,15 @@ def receive_stock():
             product_id = existing["id"]
             run("""UPDATE smartshop_products SET storage_quantity = storage_quantity + :quantity,
                 buying_price = :buying_price, selling_price = :selling_price,
+                item_barcode = COALESCE(:item_barcode, item_barcode),
                 box_barcode = COALESCE(:box_barcode, box_barcode) WHERE id = :product_id""",
                 {"quantity": quantity, "buying_price": str(buying_price), "selling_price": str(selling_price),
-                 "box_barcode": box_barcode, "product_id": product_id})
+                 "box_barcode": box_barcode, "item_barcode": item_barcode, "product_id": product_id})
         else:
             product_id = insert("""INSERT INTO smartshop_products
-                (name, box_barcode, storage_quantity, buying_price, selling_price)
-                VALUES (:name, :box_barcode, :quantity, :buying_price, :selling_price)""",
-                {"name": name, "box_barcode": box_barcode, "quantity": quantity,
+                (name, item_barcode, box_barcode, storage_quantity, buying_price, selling_price)
+                VALUES (:name, :item_barcode, :box_barcode, :quantity, :buying_price, :selling_price)""",
+                {"name": name, "item_barcode": item_barcode, "box_barcode": box_barcode, "quantity": quantity,
                  "buying_price": str(buying_price), "selling_price": str(selling_price)})
         run("""INSERT INTO smartshop_stock_movements
             (product_id, movement_type, quantity, source_location, destination_location, note)
@@ -65,7 +67,7 @@ def receive_stock():
             {"product_id": product_id, "quantity": quantity})
         flash(f"Received {quantity} units of {name} into storage.", "success")
         return redirect(url_for("dashboard", role="manager"))
-    return render_template("form.html", mode="receive", smartshop_products=[])
+    return render_template("form.html", mode="receive", products=[])
 
 @app.route("/manager/display", methods=["GET", "POST"])
 def move_to_display():
@@ -90,7 +92,7 @@ def move_to_display():
             flash("Stock moved to display. Total stock remains unchanged.", "success")
         return redirect(url_for("move_to_display"))
     smartshop_products = fetch_all("SELECT * FROM smartshop_products ORDER BY name")
-    return render_template("form.html", mode="display", smartshop_products=smartshop_products)
+    return render_template("form.html", mode="display", products=smartshop_products)
 
 @app.route("/employee/pos", methods=["GET", "POST"])
 def point_of_sale():
@@ -124,7 +126,7 @@ def point_of_sale():
             flash(f"Sale completed: {quantity} × {product['name']} = K{amount}.", "success")
         return redirect(url_for("point_of_sale"))
     smartshop_products = fetch_all("SELECT * FROM smartshop_products ORDER BY name")
-    return render_template("form.html", mode="pos", smartshop_products=smartshop_products)
+    return render_template("form.html", mode="pos", products=smartshop_products)
 
 @app.get("/api/product/barcode/<barcode>")
 def barcode_lookup(barcode):
