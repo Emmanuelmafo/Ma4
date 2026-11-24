@@ -3,13 +3,51 @@
 <h1>{% if mode=='receive' %}Receive box stock{% elif mode=='display' %}Prepare display items{% else %}Point of Sale{% endif %}</h1>
 <section class="panel"><form method="post">
 {% if mode=='receive' %}
-<label>Product name<input name="name" required placeholder="e.g. 1L Cooking Oil"></label>
+<label>Product name<input id="product-name" name="name" required placeholder="e.g. 1L Cooking Oil"></label>
+<div class="ocr-tools">
+  <label>Capture product name with camera (OCR)<input id="label-photo" type="file" accept="image/*" capture="environment"></label>
+  <button type="button" id="read-label">Read name from photo</button>
+  <small id="ocr-status">Take a clear photo of the printed product name. Check the result before saving.</small>
+</div>
 <div class="grid"><label>Number of boxes<input type="number" name="boxes" min="0" value="1"></label><label>Units per box<input type="number" name="units_per_box" min="0" value="12"></label><label>Loose units<input type="number" name="loose_units" min="0" value="0"></label></div>
-<label>Box barcode (optional)<input name="box_barcode"></label>
+<div class="grid">
+  <label>Individual product barcode (optional)<input name="item_barcode" inputmode="numeric" placeholder="Scan or enter barcode"></label>
+  <label>Box / pack barcode (optional)<input name="box_barcode" inputmode="numeric" placeholder="Scan or enter barcode"></label>
+</div>
+<small>Barcodes are saved against this product for identification during sales. A barcode scanner can enter the number into these fields.</small>
 <div class="grid"><label>Buying price per unit<input name="buying_price" type="number" min="0" step="0.01" value="0"></label><label>Selling price per unit<input name="selling_price" type="number" min="0" step="0.01" value="0"></label></div>
 <button type="submit">Receive stock into storage</button>
 {% elif mode=='display' %}
 <label>Product<select name="product_id" required><option value="">Select product</option>{% for p in products %}<option value="{{p.id}}">{{p.name}} — {{p.storage_quantity}} in storage</option>{% endfor %}</select></label><label>Quantity to move<input name="quantity" type="number" min="1" required></label><button type="submit">Move to display</button>
 {% else %}
 <label>Barcode (optional)<input name="barcode" placeholder="Scan or enter barcode"></label><label>Choose product if no barcode<select name="product_id"><option value="">Select product</option>{% for p in products %}<option value="{{p.id}}">{{p.name}} — {{p.display_quantity}} on display — K{{p.selling_price}}</option>{% endfor %}</select></label><label>Quantity<input name="quantity" type="number" min="1" value="1" required></label><button type="submit">Complete sale</button>
-{% endif %}</form></section>{% endblock %}
+{% endif %}</form></section>
+{% if mode=='receive' %}
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script>
+  const photoInput = document.getElementById('label-photo');
+  const readButton = document.getElementById('read-label');
+  const nameInput = document.getElementById('product-name');
+  const statusText = document.getElementById('ocr-status');
+  readButton.addEventListener('click', async () => {
+    const file = photoInput.files && photoInput.files[0];
+    if (!file) { statusText.textContent = 'Take or select a photo first.'; return; }
+    if (!window.Tesseract) { statusText.textContent = 'OCR library could not load. You can type the name manually.'; return; }
+    readButton.disabled = true;
+    statusText.textContent = 'Reading the product label…';
+    try {
+      const result = await Tesseract.recognize(file, 'eng');
+      const lines = result.data.text.split('\\n').map(line => line.trim()).filter(Boolean);
+      nameInput.value = lines[0] || '';
+      statusText.textContent = nameInput.value
+        ? 'Name captured. Check and correct it before saving.'
+        : 'No clear name found. Try another photo or type it manually.';
+    } catch (error) {
+      statusText.textContent = 'Could not read that photo. Type the name manually or try again.';
+    } finally {
+      readButton.disabled = false;
+    }
+  });
+</script>
+{% endif %}
+{% endblock %}
