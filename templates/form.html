@@ -133,25 +133,88 @@
 {% if mode=='receive' %}
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
+(() => {
   const photoInput = document.getElementById('label-photo');
   const readButton = document.getElementById('read-label');
   const nameInput = document.getElementById('product-name');
   const statusText = document.getElementById('ocr-status');
+
+  function prepareImage(file) {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      const url = URL.createObjectURL(file);
+      image.onload = () => {
+        const maxWidth = 1800;
+        const scale = Math.min(2.5, maxWidth / image.naturalWidth);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(image.naturalWidth * scale);
+        canvas.height = Math.round(image.naturalHeight * scale);
+        const context = canvas.getContext('2d', { willReadFrequently: true });
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
+        const data = pixels.data;
+        for (let i = 0; i < data.length; i += 4) {
+          const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+          const enhanced = Math.max(0, Math.min(255, (gray - 128) * 1.65 + 128));
+          data[i] = data[i + 1] = data[i + 2] = enhanced;
+        }
+        context.putImageData(pixels, 0, 0);
+        URL.revokeObjectURL(url);
+        resolve(canvas);
+      };
+      image.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error('The selected image could not be opened.'));
+      };
+      image.src = url;
+    });
+  }
+
   readButton.addEventListener('click', async () => {
     const file = photoInput.files && photoInput.files[0];
-    if (!file) { statusText.textContent = 'Take or select a photo first.'; return; }
-    if (!window.Tesseract) { statusText.textContent = 'OCR library could not load. Type the name manually.'; return; }
+    if (!file) {
+      statusText.textContent = 'Take or select a clear, close-up photo of the printed product name.';
+      return;
+    }
+    if (!window.Tesseract) {
+      statusText.textContent = 'OCR could not load. Type the product name manually.';
+      return;
+    }
+
     readButton.disabled = true;
-    statusText.textContent = 'Reading the product label…';
+    statusText.textContent = 'Enhancing the photo and reading the label…';
     try {
-      const result = await Tesseract.recognize(file, 'eng');
-      const lines = result.data.text.split('\\n').map(line => line.trim()).filter(Boolean);
-      nameInput.value = lines[0] || '';
-      statusText.textContent = nameInput.value ? 'Name captured. Check it before saving.' : 'No clear name found. Try another photo.';
+      const image = await prepareImage(file);
+      const result = await Tesseract.recognize(image, 'eng', {
+        logger: message => {
+          if (message.status === 'recognizing text') {
+            statusText.textContent = 'Reading text… ' + Math.round((message.progress || 0) * 100) + '%';
+          }
+        },
+        tessedit_pageseg_mode: '6'
+      });
+
+      const lines = (result.data.text || '')
+        .split(/\r?\n/)
+        .map(line => line.replace(/[^\p{L}\p{N} &'().,+\-/]/gu, ' ').replace(/\s+/g, ' ').trim())
+        .filter(line => line.length >= 3)
+        .sort((a, b) => b.length - a.length);
+
+      const bestLine = lines[0] || '';
+      const confidence = Number(result.data.confidence || 0);
+      if (!bestLine || confidence < 35) {
+        statusText.textContent = 'The text is unclear. Retake a close, well-lit photo with the product name filling the frame, or type it manually.';
+        return;
+      }
+      nameInput.value = bestLine;
+      statusText.textContent = 'Text detected (check it carefully before saving). OCR confidence: ' + Math.round(confidence) + '%.';
     } catch (error) {
-      statusText.textContent = 'Could not read that photo. Type the name manually or try again.';
-    } finally { readButton.disabled = false; }
+      statusText.textContent = 'Could not read that photo. Try a closer, sharper photo or type the name manually.';
+    } finally {
+      readButton.disabled = false;
+    }
   });
+})();
 </script>
 {% endif %}
 {% endblock %}
