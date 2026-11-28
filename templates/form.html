@@ -225,24 +225,19 @@
         Tesseract.recognize(centralLabel, 'eng', { ...recognizeOptions, logger: () => {} })
       ]);
 
-      const candidates = [labelResult, wholeResult].flatMap(result =>
-        (result.data.lines || [])
-          .map(line => ({
-            text: (line.text || '').replace(/[^\p{L}\p{N} &'().,+\-/]/gu, ' ').replace(/\s+/g, ' ').trim(),
-            confidence: Number(line.confidence || 0)
-          }))
-          .filter(line => line.text.length >= 3 && /[A-Za-z]{2,}/.test(line.text))
-      );
-      candidates.sort((a, b) => b.confidence - a.confidence);
-      const accepted = candidates.filter(line => line.confidence >= 35);
-      const uniqueText = [...new Set(accepted.map(line => line.text))].slice(0, 4);
-      const best = accepted[0];
-      if (!best || uniqueText.length === 0) {
-        statusText.textContent = 'The label text is unclear. Try a close, straight-on photo, or type the product name manually.';
+      // Use only the OCR engine's verbatim transcription from the photo.
+      // Do not merge, rewrite, autocomplete, or invent product-name text.
+      const labelText = (labelResult.data.text || '').replace(/[ \t]+/g, ' ').trim();
+      const fullText = (wholeResult.data.text || '').replace(/[ \t]+/g, ' ').trim();
+      const extractedText = labelText || fullText;
+      const confidence = Number(labelText ? labelResult.data.confidence : wholeResult.data.confidence) || 0;
+
+      if (!extractedText || confidence < 45) {
+        statusText.textContent = 'The photo text could not be read clearly. No name was inserted. Take a clearer photo or type the name yourself.';
         return;
       }
-      nameInput.value = uniqueText.join(' ');
-      statusText.textContent = 'Possible text detected. Check and correct it before saving. Best-line confidence: ' + Math.round(best.confidence) + '%.';
+      nameInput.value = extractedText;
+      statusText.textContent = 'Text copied from the photo by OCR. Check it carefully; nothing has been auto-corrected or generated. Confidence: ' + Math.round(confidence) + '%.';
 
     } catch (error) {
       statusText.textContent = 'Could not read that photo. Try a closer, sharper photo or type the name manually.';
