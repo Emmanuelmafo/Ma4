@@ -201,29 +201,49 @@
     statusText.textContent = 'Enhancing the photo and reading the label…';
     try {
       const image = await prepareImage(file);
-      const result = await Tesseract.recognize(image, 'eng', {
+      // Read the full photo and a focused crop around the main label.
+      const centralLabel = document.createElement('canvas');
+      centralLabel.width = Math.round(image.width * 0.94);
+      centralLabel.height = Math.round(image.height * 0.52);
+      centralLabel.getContext('2d').drawImage(
+        image,
+        Math.round(image.width * 0.03), Math.round(image.height * 0.38),
+        centralLabel.width, centralLabel.height,
+        0, 0, centralLabel.width, centralLabel.height
+      );
+
+      const recognizeOptions = {
         logger: message => {
           if (message.status === 'recognizing text') {
             statusText.textContent = 'Reading text… ' + Math.round((message.progress || 0) * 100) + '%';
           }
         },
-        tessedit_pageseg_mode: '6'
-      });
+        tessedit_pageseg_mode: '11'
+      };
+      const [wholeResult, labelResult] = await Promise.all([
+        Tesseract.recognize(image, 'eng', recognizeOptions),
+        Tesseract.recognize(centralLabel, 'eng', { ...recognizeOptions, logger: () => {} })
+      ]);
 
-      const lines = (result.data.text || '')
-        .split(/\r?\n/)
-        .map(line => line.replace(/[^\p{L}\p{N} &'().,+\-/]/gu, ' ').replace(/\s+/g, ' ').trim())
-        .filter(line => line.length >= 3)
-        .sort((a, b) => b.length - a.length);
-
-      const bestLine = lines[0] || '';
-      const confidence = Number(result.data.confidence || 0);
-      if (!bestLine || confidence < 35) {
-        statusText.textContent = 'The text is unclear. Retake a close, well-lit photo with the product name filling the frame, or type it manually.';
+      const candidates = [labelResult, wholeResult].flatMap(result =>
+        (result.data.lines || [])
+          .map(line => ({
+            text: (line.text || '').replace(/[^\p{L}\p{N} &'().,+\-/]/gu, ' ').replace(/\s+/g, ' ').trim(),
+            confidence: Number(line.confidence || 0)
+          }))
+          .filter(line => line.text.length >= 3 && /[A-Za-z]{2,}/.test(line.text))
+      );
+      candidates.sort((a, b) => b.confidence - a.confidence);
+      const accepted = candidates.filter(line => line.confidence >= 35);
+      const uniqueText = [...new Set(accepted.map(line => line.text))].slice(0, 4);
+      const best = accepted[0];
+      if (!best || uniqueText.length === 0) {
+        statusText.textContent = 'The label text is unclear. Try a close, straight-on photo, or type the product name manually.';
         return;
       }
-      nameInput.value = bestLine;
-      statusText.textContent = 'Text detected (check it carefully before saving). OCR confidence: ' + Math.round(confidence) + '%.';
+      nameInput.value = uniqueText.join(' ');
+      statusText.textContent = 'Possible text detected. Check and correct it before saving. Best-line confidence: ' + Math.round(best.confidence) + '%.';
+
     } catch (error) {
       statusText.textContent = 'Could not read that photo. Try a closer, sharper photo or type the name manually.';
     } finally {
